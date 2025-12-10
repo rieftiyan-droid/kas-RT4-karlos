@@ -9,7 +9,7 @@ import os
 st.set_page_config(page_title="Sistem Kas RT Digital", page_icon="🏡", layout="wide")
 
 # PASSWORD ADMIN
-PASSWORD_RAHASIA = "admin123"
+PASSWORD_RAHASIA = "adminsaja1234"
 
 # NAMA FILE DATABASE GOOGLE SHEET
 SHEET_NAME = "Database Kas RT"
@@ -111,7 +111,7 @@ def delete_data(target_id):
 #               TAMPILAN UTAMA
 # ==========================================
 
-st.title("🏡 Portal Keuangan & Kas RT")
+st.title("🏡 Portal Keuangan & Kas RT 4 RW 18 KPV")
 st.caption("Sistem Transparansi Keuangan Digital")
 st.markdown("---")
 
@@ -213,7 +213,7 @@ if is_admin:
                     st.error(f"Gagal: {e}")
                 
 else:
-    st.sidebar.info("👋 Halo Warga! Cek transparansi kas di sini.")
+    st.sidebar.info("👋 Halo Warga RT 4 RW 18 KPV! Cek transparansi kas di sini.")
 
 # --- DASHBOARD UTAMA ---
 df = load_data()
