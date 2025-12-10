@@ -75,7 +75,7 @@ def load_master_warga():
                 df['ID_Rumah'] = df['Blok'].astype(str) + "-" + df['No'].astype(str)
             return df
         except:
-            return pd.DataFrame() # Return kosong jika sheet belum dibuat
+            return pd.DataFrame() 
     return pd.DataFrame()
 
 # --- 4. FUNGSI SIMPAN & HAPUS ---
@@ -120,6 +120,7 @@ def delete_data(target_id):
 # ==========================================
 
 st.title("🏡 Portal Keuangan & Monitoring Warga RT")
+st.caption("Transparansi dan Akuntabilitas Kas Lingkungan")
 st.markdown("---")
 
 # --- A. SIDEBAR (LOGIN & INPUT) ---
@@ -143,22 +144,23 @@ if is_admin:
         blok_final = ""
         status_final = "-"
         
-        # --- INPUT PEMASUKAN (Data Warga Otomatis) ---
+        # --- LOGIKA 1: INPUT PEMASUKAN (WAJIB ADA BLOK) ---
         if tipe_transaksi == "Pemasukan 💰":
+            st.info("ℹ️ Input Dana Masuk dari Warga")
             df_warga = load_master_warga()
             
             if not df_warga.empty:
-                # Buat Label Dropdown: "AA-1 (Tetap) - Budi"
+                # Dropdown Warga (Otomatis Blok & Status)
                 df_warga['Label'] = df_warga['ID_Rumah'] + " (" + df_warga['Status'] + ") - " + df_warga['Nama Penghuni']
                 pilihan_warga = st.selectbox("Pilih Warga / Rumah", df_warga['Label'].unique())
                 
-                # Ambil data asli berdasarkan pilihan dropdown
+                # Ambil data otomatis
                 data_terpilih = df_warga[df_warga['Label'] == pilihan_warga].iloc[0]
                 nama_final = data_terpilih['Nama Penghuni']
-                blok_final = data_terpilih['ID_Rumah'] # PENTING: Ini memastikan Blok sama persis!
+                blok_final = data_terpilih['ID_Rumah'] 
                 status_final = data_terpilih['Status']
             else:
-                st.warning("⚠️ Data Warga kosong! Harap buat sheet 'Data Warga' di Google Sheets.")
+                st.warning("⚠️ Data Warga kosong! Buat sheet 'Data Warga' dulu.")
                 nama_final = st.text_input("Nama Warga (Manual)")
                 blok_final = st.text_input("Blok (Manual)")
 
@@ -166,12 +168,21 @@ if is_admin:
             bulan = st.selectbox("Untuk Bulan", ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember", "-"])
             nominal_input = st.number_input("Nominal (Rp)", min_value=0, step=5000)
             
-        # --- INPUT PENGELUARAN ---
+        # --- LOGIKA 2: INPUT PENGELUARAN (TANPA BLOK) ---
         else:
-            nama_final = st.text_input("Uraian Pengeluaran (Misal: Beli Lampu)")
+            st.error("ℹ️ Input Dana Keluar / Belanja")
+            # Nama Warga diganti jadi Uraian
+            nama_final = st.text_input("Uraian Pengeluaran (Contoh: Beli Lampu, Honor Sampah)")
+            
+            # Data Blok & Status di-set kosong/strip
             blok_final = "-"
-            jenis = st.selectbox("Kategori", ["Perbaikan Fasilitas", "Konsumsi Rapat", "Honor Keamanan", "Sosial", "Lainnya"])
-            bulan = "-"
+            status_final = "-"
+            
+            jenis = st.selectbox("Kategori Pengeluaran", ["Perbaikan Fasilitas", "Konsumsi Rapat", "Honor Keamanan/Sampah", "Sosial", "Lainnya"])
+            
+            # Bulan biasanya tidak relevan untuk belanja, di-set strip
+            bulan = "-" 
+            
             nominal_input = st.number_input("Nominal Keluar (Rp)", min_value=0, step=5000)
             
         ket = st.text_area("Keterangan Tambahan")
@@ -179,7 +190,7 @@ if is_admin:
         
         # Tombol Simpan
         if st.form_submit_button("Simpan Data"):
-            if nominal_input > 0:
+            if nominal_input > 0 and nama_final:
                 with st.spinner("Menyimpan ke Cloud..."):
                     img_name = save_uploaded_file(uploaded_file)
                     
@@ -190,7 +201,7 @@ if is_admin:
                         "ID": int(datetime.now().timestamp()),
                         "Tanggal": datetime.now().strftime("%Y-%m-%d"),
                         "Nama Warga": nama_final, 
-                        "Blok": blok_final, # Blok ini sekarang PASTI sama dengan Data Warga
+                        "Blok": blok_final, 
                         "Status Rumah": status_final,
                         "Jenis Iuran": jenis, 
                         "Bulan": bulan, 
@@ -201,6 +212,8 @@ if is_admin:
                     save_new_data(new_data)
                     st.success("✅ Data Berhasil Disimpan!")
                     st.rerun()
+            else:
+                st.warning("Mohon lengkapi Nama/Uraian dan Nominal.")
 else:
     # Tampilan Sidebar Warga Biasa
     st.sidebar.info("👋 Halo Warga! Silakan cek status pembayaran Anda di layar utama.")
@@ -285,15 +298,20 @@ if not df.empty:
 
     # === TAB 2: MUTASI KAS ===
     with tab2:
+        st.caption("Daftar seluruh transaksi (Masuk & Keluar)")
         st.dataframe(df_filtered[["Tanggal", "Nama Warga", "Blok", "Jenis Iuran", "Nominal", "Keterangan"]], use_container_width=True)
 
     # === TAB 3: PENGELUARAN ===
     with tab3:
+        st.caption("Khusus daftar belanja/pengeluaran RT")
         df_keluar = df_filtered[df_filtered['Nominal'] < 0]
         if not df_keluar.empty:
-            fig = px.pie(df_keluar, values=df_keluar['Nominal'].abs(), names='Jenis Iuran', title='Komposisi Pengeluaran')
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(df_keluar, use_container_width=True)
+            c_pie, c_tab = st.columns([1, 2])
+            with c_pie:
+                fig = px.pie(df_keluar, values=df_keluar['Nominal'].abs(), names='Jenis Iuran', title='Kategori Pengeluaran')
+                st.plotly_chart(fig, use_container_width=True)
+            with c_tab:
+                st.dataframe(df_keluar[["Tanggal", "Nama Warga", "Jenis Iuran", "Nominal", "Keterangan"]], use_container_width=True)
         else:
             st.info("Belum ada pengeluaran tahun ini.")
 
@@ -312,18 +330,6 @@ if not df.empty:
                     st.rerun()
                 else:
                     st.error("❌ ID tidak ditemukan.")
-
-    # --- ALAT BANTU CEK ERROR (DEBUGGING) ---
-    st.markdown("---")
-    with st.expander("🛠️ Bantuan: Kenapa Data Monitoring Tidak Muncul?"):
-        st.write("Agar data muncul hijau, kolom **Blok** di Data Transaksi harus SAMA PERSIS dengan **ID_Rumah** di Data Warga.")
-        col_dbg1, col_dbg2 = st.columns(2)
-        with col_dbg1:
-            st.info("1. Master Data Warga (ID_Rumah)")
-            if not df_warga.empty: st.dataframe(df_warga[['ID_Rumah', 'Nama Penghuni']], height=200)
-        with col_dbg2:
-            st.info("2. Data Transaksi (Blok)")
-            if not df_filtered.empty: st.dataframe(df_filtered[['Tanggal', 'Nama Warga', 'Blok']], height=200)
 
 else:
     # JIKA DATABASE KOSONG / ERROR
