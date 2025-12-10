@@ -63,6 +63,9 @@ def load_master_warga():
             df = pd.DataFrame(data)
             if not df.empty:
                 df['ID_Rumah'] = df['Blok'].astype(str) + "-" + df['No'].astype(str)
+                # Pastikan kolom Nama Penghuni ada, kalau tidak ada anggap string kosong
+                if 'Nama Penghuni' not in df.columns:
+                    df['Nama Penghuni'] = ""
             return df
         except:
             return pd.DataFrame() 
@@ -132,23 +135,37 @@ if is_admin:
         jenis = ""
         bulan = "-"
         
-        # LOGIKA INPUT (Sama seperti sebelumnya)
+        # LOGIKA INPUT PEMASUKAN
         if tipe_transaksi == "Pemasukan 💰":
             sumber_dana = st.radio("Sumber Dana:", ["Dari Warga", "Luar Warga (Umum)"], horizontal=True)
+            
             if sumber_dana == "Dari Warga":
                 df_warga = load_master_warga()
                 if not df_warga.empty:
-                    df_warga['Label'] = df_warga['ID_Rumah'] + " (" + df_warga['Status'] + ") - " + df_warga['Nama Penghuni']
+                    # Bikin label dropdown. Kalau nama kosong, cuma tampilkan Blok.
+                    df_warga['Label'] = df_warga['ID_Rumah'] + " (" + df_warga['Status'] + ")" + df_warga['Nama Penghuni'].apply(lambda x: " - " + str(x) if str(x).strip() != "" else "")
+                    
                     pilihan_warga = st.selectbox("Pilih Warga", df_warga['Label'].unique())
                     data_terpilih = df_warga[df_warga['Label'] == pilihan_warga].iloc[0]
-                    nama_final = data_terpilih['Nama Penghuni']; blok_final = data_terpilih['ID_Rumah']; status_final = data_terpilih['Status']
+                    
+                    # LOGIKA BARU: Jika nama kosong, pakai ID Rumah
+                    nama_asli = str(data_terpilih['Nama Penghuni']).strip()
+                    if nama_asli == "":
+                        nama_final = f"Warga {data_terpilih['ID_Rumah']}" # Contoh: Warga AA-1
+                    else:
+                        nama_final = nama_asli
+                        
+                    blok_final = data_terpilih['ID_Rumah']
+                    status_final = data_terpilih['Status']
                 else:
                     st.warning("⚠️ Data Warga kosong!"); nama_final = st.text_input("Nama Warga"); blok_final = st.text_input("Blok")
+                
                 jenis = st.selectbox("Jenis Iuran", ["Iuran Wajib", "Kematian", "Agustusan", "Sumbangan Sukarela", "Lainnya"])
                 bulan = st.selectbox("Untuk Bulan", ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember", "-"])
             else: 
                 jenis = st.selectbox("Sumber Pemasukan", ["Kas Tahun Sebelumnya", "Dana Desa/RW", "Bunga Bank", "Donasi Eksternal", "Lainnya"])
                 nama_final = jenis; blok_final = "-"; status_final = "-"; bulan = "-" 
+            
             nominal_input = st.number_input("Nominal (Rp)", min_value=0, step=5000)
             
         else: # PENGELUARAN
@@ -161,10 +178,15 @@ if is_admin:
         uploaded_file = st.file_uploader("Upload Bukti", type=['jpg', 'png'])
         
         if st.form_submit_button("Simpan Data"):
-            if nominal_input > 0 and nama_final:
+            # Validasi diperlonggar: Asal Nominal diisi, simpan!
+            if nominal_input > 0:
                 with st.spinner("Menyimpan..."):
                     img_name = save_uploaded_file(uploaded_file)
                     final_nominal = nominal_input if tipe_transaksi == "Pemasukan 💰" else -nominal_input
+                    
+                    # Pastikan nama tidak kosong total saat disimpan
+                    if not nama_final: nama_final = "Tanpa Nama"
+
                     new_data = {
                         "ID": int(datetime.now().timestamp()), "Tanggal": datetime.now().strftime("%Y-%m-%d"),
                         "Nama Warga": nama_final, "Blok": blok_final, "Status Rumah": status_final,
@@ -173,23 +195,22 @@ if is_admin:
                     save_new_data(new_data)
                     st.success("✅ Tersimpan!"); st.rerun()
             else:
-                st.warning("Nama dan Nominal wajib diisi.")
+                st.warning("⚠️ Nominal uang wajib diisi (tidak boleh 0).")
 
-    # --- TOMBOL RESET (DIPINDAHKAN KE SINI) ---
+    # --- TOMBOL RESET ---
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⚠️ Area Berbahaya")
-    if st.sidebar.button("🔴 Reset Database & Header"):
-        client = connect_to_gsheet()
-        if client:
-            try:
-                sh = client.open(SHEET_NAME).sheet1
-                sh.clear()
-                # INI KUNCI PERBAIKANNYA: MEMBUAT KOLOM YANG BENAR
-                sh.append_row(["ID", "Tanggal", "Nama Warga", "Blok", "Status Rumah", "Jenis Iuran", "Bulan", "Nominal", "Keterangan", "Bukti Bayar"])
-                st.sidebar.success("✅ Database berhasil di-reset & diperbaiki!")
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"Gagal: {e}")
+    with st.sidebar.expander("⚠️ Area Reset"):
+        if st.button("🔴 Reset Database & Header"):
+            client = connect_to_gsheet()
+            if client:
+                try:
+                    sh = client.open(SHEET_NAME).sheet1
+                    sh.clear()
+                    sh.append_row(["ID", "Tanggal", "Nama Warga", "Blok", "Status Rumah", "Jenis Iuran", "Bulan", "Nominal", "Keterangan", "Bukti Bayar"])
+                    st.success("✅ Database berhasil diperbaiki!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal: {e}")
                 
 else:
     st.sidebar.info("👋 Halo Warga! Cek transparansi kas di sini.")
