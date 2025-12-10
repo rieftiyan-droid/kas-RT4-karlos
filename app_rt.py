@@ -5,33 +5,36 @@ from datetime import datetime
 import gspread
 import os
 
-# --- KONFIGURASI HALAMAN ---
+# --- KONFIGURASI ---
 st.set_page_config(page_title="Sistem Kas RT Digital", page_icon="🏡", layout="wide")
 
 # PASSWORD ADMIN
 PASSWORD_RAHASIA = "admin123"
 
-# NAMA FILE DATABASE
+# NAMA FILE DATABASE GOOGLE SHEET
 SHEET_NAME = "Database Kas RT"
 FOLDER_GAMBAR = "bukti_bayar"
 
+# Buat folder gambar jika belum ada
 if not os.path.exists(FOLDER_GAMBAR):
     os.makedirs(FOLDER_GAMBAR)
 
-# --- FUNGSI KONEKSI ---
+# --- 1. FUNGSI KONEKSI KE GOOGLE SHEETS ---
 def connect_to_gsheet():
     try:
+        # Cek apakah jalan di Laptop (Lokal)
         if os.path.exists("credentials.json"):
             client = gspread.service_account(filename="credentials.json")
+        # Cek apakah jalan di Streamlit Cloud (Internet)
         elif "gcp_service_account" in st.secrets:
             client = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         else:
             return None
         return client
-    except:
+    except Exception as e:
         return None
 
-# --- FUNGSI LOAD DATA ---
+# --- 2. LOAD DATA TRANSAKSI (SHEET 1) ---
 def load_data():
     client = connect_to_gsheet()
     if client:
@@ -40,15 +43,24 @@ def load_data():
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
             if df.empty: return pd.DataFrame()
+            
+            # Bersihkan data: Ubah Nominal jadi Angka
             if 'Nominal' in df.columns:
                 df['Nominal'] = pd.to_numeric(df['Nominal'], errors='coerce').fillna(0)
+            
+            # Ambil Tahun dari Tanggal
             if 'Tanggal' in df.columns:
-                df['Tahun'] = pd.to_datetime(df['Tanggal']).dt.year
+                df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+                df['Tahun'] = df['Tanggal'].dt.year
+                # Kembalikan format tanggal jadi string agar rapi di tabel
+                df['Tanggal'] = df['Tanggal'].dt.strftime('%Y-%m-%d')
+                
             return df
         except:
             pass
     return pd.DataFrame()
 
+# --- 3. LOAD MASTER DATA WARGA (SHEET "Data Warga") ---
 def load_master_warga():
     client = connect_to_gsheet()
     if client:
@@ -56,14 +68,17 @@ def load_master_warga():
             sheet = client.open(SHEET_NAME).worksheet("Data Warga")
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
-            # Buat ID Unik untuk pencocokan (Blok-No)
+            
+            # Buat ID Unik (Gabungan Blok dan No)
+            # Contoh: Blok "AA", No "1" -> ID "AA-1"
             if not df.empty:
                 df['ID_Rumah'] = df['Blok'].astype(str) + "-" + df['No'].astype(str)
             return df
         except:
-            return pd.DataFrame()
+            return pd.DataFrame() # Return kosong jika sheet belum dibuat
     return pd.DataFrame()
 
+# --- 4. FUNGSI SIMPAN & HAPUS ---
 def save_uploaded_file(uploadedfile):
     if uploadedfile is not None:
         try:
@@ -100,14 +115,18 @@ def delete_data(target_id):
             return False
     return False
 
-# --- UI UTAMA ---
-st.title("🏡 Portal Keuangan & Monitoring Warga")
+# ==========================================
+#               TAMPILAN UTAMA (UI)
+# ==========================================
+
+st.title("🏡 Portal Keuangan & Monitoring Warga RT")
 st.markdown("---")
 
-# --- SIDEBAR ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1909/1909672.png", width=100)
+# --- A. SIDEBAR (LOGIN & INPUT) ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1909/1909672.png", width=80)
 st.sidebar.title("Menu Admin")
 
+# Kotak Password
 input_pass = st.sidebar.text_input("🔑 Password Admin", type="password")
 is_admin = (input_pass == PASSWORD_RAHASIA)
 
@@ -116,160 +135,208 @@ if is_admin:
     st.sidebar.markdown("---")
     st.sidebar.header("📝 Input Transaksi")
     
-    tipe_transaksi = st.sidebar.radio("Tipe", ["Pemasukan 💰", "Pengeluaran 💸"])
+    # Pilihan Input
+    tipe_transaksi = st.sidebar.radio("Tipe Transaksi", ["Pemasukan 💰", "Pengeluaran 💸"])
     
     with st.sidebar.form("form_tambah"):
         nama_final = ""
         blok_final = ""
         status_final = "-"
         
+        # --- INPUT PEMASUKAN (Data Warga Otomatis) ---
         if tipe_transaksi == "Pemasukan 💰":
             df_warga = load_master_warga()
+            
             if not df_warga.empty:
+                # Buat Label Dropdown: "AA-1 (Tetap) - Budi"
                 df_warga['Label'] = df_warga['ID_Rumah'] + " (" + df_warga['Status'] + ") - " + df_warga['Nama Penghuni']
-                pilihan_warga = st.selectbox("Pilih Warga", df_warga['Label'].unique())
+                pilihan_warga = st.selectbox("Pilih Warga / Rumah", df_warga['Label'].unique())
+                
+                # Ambil data asli berdasarkan pilihan dropdown
                 data_terpilih = df_warga[df_warga['Label'] == pilihan_warga].iloc[0]
                 nama_final = data_terpilih['Nama Penghuni']
-                blok_final = data_terpilih['ID_Rumah']
+                blok_final = data_terpilih['ID_Rumah'] # PENTING: Ini memastikan Blok sama persis!
                 status_final = data_terpilih['Status']
             else:
-                st.warning("Data Warga kosong!")
-                nama_final = st.text_input("Nama")
-                blok_final = st.text_input("Blok")
+                st.warning("⚠️ Data Warga kosong! Harap buat sheet 'Data Warga' di Google Sheets.")
+                nama_final = st.text_input("Nama Warga (Manual)")
+                blok_final = st.text_input("Blok (Manual)")
 
-            jenis = st.selectbox("Jenis", ["Iuran Wajib", "Kematian", "Agustusan", "Sumbangan", "Lainnya"])
-            bulan = st.selectbox("Bulan", ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember", "-"])
-            nominal_input = st.number_input("Nominal", min_value=0, step=5000)
+            jenis = st.selectbox("Jenis Pemasukan", ["Iuran Wajib", "Kematian", "Agustusan", "Sumbangan", "Lainnya"])
+            bulan = st.selectbox("Untuk Bulan", ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember", "-"])
+            nominal_input = st.number_input("Nominal (Rp)", min_value=0, step=5000)
             
+        # --- INPUT PENGELUARAN ---
         else:
-            nama_final = st.text_input("Uraian Pengeluaran")
+            nama_final = st.text_input("Uraian Pengeluaran (Misal: Beli Lampu)")
             blok_final = "-"
-            jenis = st.selectbox("Kategori", ["Perbaikan", "Konsumsi", "Honor", "Sosial", "Lainnya"])
+            jenis = st.selectbox("Kategori", ["Perbaikan Fasilitas", "Konsumsi Rapat", "Honor Keamanan", "Sosial", "Lainnya"])
             bulan = "-"
-            nominal_input = st.number_input("Nominal Keluar", min_value=0, step=5000)
+            nominal_input = st.number_input("Nominal Keluar (Rp)", min_value=0, step=5000)
             
-        ket = st.text_area("Keterangan")
-        uploaded_file = st.file_uploader("Upload Bukti", type=['jpg', 'png'])
+        ket = st.text_area("Keterangan Tambahan")
+        uploaded_file = st.file_uploader("Upload Bukti/Struk", type=['jpg', 'png'])
         
-        if st.form_submit_button("Simpan"):
+        # Tombol Simpan
+        if st.form_submit_button("Simpan Data"):
             if nominal_input > 0:
-                with st.spinner("Menyimpan..."):
+                with st.spinner("Menyimpan ke Cloud..."):
                     img_name = save_uploaded_file(uploaded_file)
+                    
+                    # Jika Pengeluaran, jadikan Minus
                     final_nominal = nominal_input if tipe_transaksi == "Pemasukan 💰" else -nominal_input
+                    
                     new_data = {
-                        "ID": int(datetime.now().timestamp()), "Tanggal": datetime.now().strftime("%Y-%m-%d"),
-                        "Nama Warga": nama_final, "Blok": blok_final, "Status Rumah": status_final,
-                        "Jenis Iuran": jenis, "Bulan": bulan, "Nominal": final_nominal, 
-                        "Keterangan": ket, "Bukti Bayar": img_name
+                        "ID": int(datetime.now().timestamp()),
+                        "Tanggal": datetime.now().strftime("%Y-%m-%d"),
+                        "Nama Warga": nama_final, 
+                        "Blok": blok_final, # Blok ini sekarang PASTI sama dengan Data Warga
+                        "Status Rumah": status_final,
+                        "Jenis Iuran": jenis, 
+                        "Bulan": bulan, 
+                        "Nominal": final_nominal, 
+                        "Keterangan": ket, 
+                        "Bukti Bayar": img_name
                     }
                     save_new_data(new_data)
-                    st.success("Tersimpan!")
+                    st.success("✅ Data Berhasil Disimpan!")
                     st.rerun()
+else:
+    # Tampilan Sidebar Warga Biasa
+    st.sidebar.info("👋 Halo Warga! Silakan cek status pembayaran Anda di layar utama.")
 
-# --- DASHBOARD ---
+
+# --- B. DASHBOARD UTAMA ---
 df = load_data()
 df_warga = load_master_warga()
 
 if not df.empty:
-    list_tahun = sorted(df['Tahun'].unique(), reverse=True) if 'Tahun' in df.columns else [datetime.now().year]
-    pilih_tahun = st.selectbox("📅 Tahun Laporan", list_tahun)
-    df_filtered = df[df['Tahun'] == pilih_tahun] if 'Tahun' in df.columns else df
+    # --- FILTER TAHUN ---
+    col_header, col_filter = st.columns([3, 1])
+    with col_header:
+        st.subheader("Laporan Keuangan RT")
+    with col_filter:
+        list_tahun = sorted(df['Tahun'].dropna().unique(), reverse=True)
+        if not list_tahun: list_tahun = [datetime.now().year]
+        pilih_tahun = st.selectbox("📅 Pilih Tahun", list_tahun)
     
-    # Ringkasan
+    # Filter DataFrame berdasarkan tahun
+    df_filtered = df[df['Tahun'] == pilih_tahun]
+    
+    # --- KARTU RINGKASAN (METRICS) ---
     total_masuk = df_filtered[df_filtered['Nominal'] > 0]['Nominal'].sum()
     total_keluar = df_filtered[df_filtered['Nominal'] < 0]['Nominal'].sum()
-    st.metric("Saldo Akhir Kas", f"Rp {total_masuk + total_keluar:,.0f}")
+    saldo_akhir = total_masuk + total_keluar
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💰 Pemasukan", f"Rp {total_masuk:,.0f}")
+    c2.metric("💸 Pengeluaran", f"Rp {abs(total_keluar):,.0f}")
+    c3.metric("💳 Saldo Kas", f"Rp {saldo_akhir:,.0f}")
+    
+    st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["✅ Ceklis Iuran Wajib", "📊 Data Transaksi", "🏠 Database Warga"])
+    # --- TABULASI MENU ---
+    tab1, tab2, tab3, tab4 = st.tabs(["✅ Monitoring Iuran Wajib", "📊 Mutasi Kas", "💸 Rincian Pengeluaran", "🏠 Database Warga"])
 
-    # --- TAB CEKLIS IURAN WAJIB (FITUR UTAMA) ---
+    # === TAB 1: MONITORING (MATRIKS) ===
     with tab1:
-        st.subheader("Monitoring Pembayaran Iuran Wajib")
-        st.caption("🟥 Merah = Belum Bayar | 🟩 Hijau = Lunas | ⬜ Abu = Rumah Kosong")
+        st.caption(f"Status Pembayaran 'Iuran Wajib' Tahun {pilih_tahun}")
+        st.write("🟥 Merah: Belum Bayar | 🟩 Hijau: Lunas | ⬜ Abu: Rumah Kosong")
         
         if not df_warga.empty:
-            # 1. Siapkan DataFrame Kosong (Semua Warga x Bulan)
             bulan_urut = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
             
-            # Buat tabel dasar dari Data Warga
+            # 1. Buat Tabel Dasar (Index: Blok/ID_Rumah)
             df_monitor = df_warga[['ID_Rumah', 'Status', 'Nama Penghuni']].copy()
             df_monitor.set_index('ID_Rumah', inplace=True)
             
-            # 2. Ambil Data Pembayaran Wajib Tahun Ini
+            # 2. Ambil Transaksi 'Wajib' Tahun Ini
             df_bayar = df_filtered[
-                (df_filtered['Jenis Iuran'].str.contains("Wajib", na=False)) & 
+                (df_filtered['Jenis Iuran'].str.contains("Wajib", case=False, na=False)) & 
                 (df_filtered['Nominal'] > 0)
             ]
             
-            # 3. Isi Data Pembayaran ke Tabel Monitor
+            # 3. Isi Tabel Monitor
             for bln in bulan_urut:
-                df_monitor[bln] = 0 # Set default 0 (Belum Bayar)
+                df_monitor[bln] = 0 # Default 0 (Belum Bayar)
                 
-                # Cek siapa yang bayar di bulan ini
+                # Cek pembayaran bulan ini
                 bayar_bln = df_bayar[df_bayar['Bulan'] == bln]
                 for _, row in bayar_bln.iterrows():
-                    # Jika Blok warga ada di daftar pembayaran, update jadi nominal
+                    # Jika Blok ada di daftar warga, tandai Nominalnya
                     if row['Blok'] in df_monitor.index:
                         df_monitor.at[row['Blok'], bln] = row['Nominal']
 
-            # 4. Fungsi Pewarnaan (Styling)
-            def warnai_tabel(val):
-                if isinstance(val, int) or isinstance(val, float):
-                    if val > 0:
-                        return 'background-color: #d4edda; color: green' # Hijau (Bayar)
-                    elif val == 0:
-                        return 'background-color: #f8d7da; color: red' # Merah (Nunggak)
+            # 4. Styling (Pewarnaan)
+            def warnai_sel(val):
+                if isinstance(val, (int, float)):
+                    if val > 0: return 'background-color: #d4edda; color: green; font-weight: bold' # Hijau
+                    if val == 0: return 'background-color: #f8d7da; color: red' # Merah
                 return ''
-
-            def warnai_baris(row):
-                # Jika status Kosong, warna abu-abu semua
-                if row['Status'] == 'Kosong':
-                    return ['background-color: #e2e3e5; color: #6c757d'] * len(row)
-                else:
-                    # Logic per sel
-                    styles = []
-                    for col in row.index:
-                        val = row[col]
-                        if col in bulan_urut: # Kolom Bulan
-                            if val > 0:
-                                styles.append('background-color: #88ea88; color: black; font-weight: bold') # Hijau Terang
-                            else:
-                                styles.append('background-color: #ffaaaa; color: black') # Merah Terang
-                        else:
-                            styles.append('') # Kolom Nama/Status
-                    return styles
-
+            
             # Tampilkan Tabel
             st.dataframe(
-                df_monitor.style.apply(warnai_baris, axis=1).format("{:,.0f}", subset=bulan_urut),
+                df_monitor.style.map(warnai_sel, subset=bulan_urut).format("{:,.0f}", subset=bulan_urut),
                 use_container_width=True,
                 height=600
             )
-            
         else:
-            st.warning("Silakan isi sheet 'Data Warga' di Google Sheets terlebih dahulu.")
+            st.warning("⚠️ Data Warga belum muncul. Pastikan sheet 'Data Warga' sudah dibuat di Google Sheet.")
 
+    # === TAB 2: MUTASI KAS ===
     with tab2:
-        st.dataframe(df_filtered, use_container_width=True)
-        
-    with tab3:
-        if not df_warga.empty:
-            st.dataframe(df_warga, use_container_width=True)
+        st.dataframe(df_filtered[["Tanggal", "Nama Warga", "Blok", "Jenis Iuran", "Nominal", "Keterangan"]], use_container_width=True)
 
-    # ADMIN DELETE
+    # === TAB 3: PENGELUARAN ===
+    with tab3:
+        df_keluar = df_filtered[df_filtered['Nominal'] < 0]
+        if not df_keluar.empty:
+            fig = px.pie(df_keluar, values=df_keluar['Nominal'].abs(), names='Jenis Iuran', title='Komposisi Pengeluaran')
+            st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df_keluar, use_container_width=True)
+        else:
+            st.info("Belum ada pengeluaran tahun ini.")
+
+    # === TAB 4: DATABASE WARGA ===
+    with tab4:
+        st.dataframe(df_warga, use_container_width=True)
+
+    # --- FITUR HAPUS DATA (ADMIN ONLY) ---
     if is_admin:
-        with st.expander("Hapus Data"):
-            del_id = st.number_input("ID", min_value=0)
-            if st.button("Hapus"):
-                if delete_data(del_id):
-                    st.success("Dihapus"); st.rerun()
+        st.markdown("---")
+        with st.expander("⚠️ Menu Hapus Data (Admin)"):
+            id_hapus = st.number_input("Masukkan ID Transaksi untuk dihapus", min_value=0)
+            if st.button("Hapus Data Permanen"):
+                if delete_data(id_hapus):
+                    st.success("✅ Data berhasil dihapus.")
+                    st.rerun()
+                else:
+                    st.error("❌ ID tidak ditemukan.")
+
+    # --- ALAT BANTU CEK ERROR (DEBUGGING) ---
+    st.markdown("---")
+    with st.expander("🛠️ Bantuan: Kenapa Data Monitoring Tidak Muncul?"):
+        st.write("Agar data muncul hijau, kolom **Blok** di Data Transaksi harus SAMA PERSIS dengan **ID_Rumah** di Data Warga.")
+        col_dbg1, col_dbg2 = st.columns(2)
+        with col_dbg1:
+            st.info("1. Master Data Warga (ID_Rumah)")
+            if not df_warga.empty: st.dataframe(df_warga[['ID_Rumah', 'Nama Penghuni']], height=200)
+        with col_dbg2:
+            st.info("2. Data Transaksi (Blok)")
+            if not df_filtered.empty: st.dataframe(df_filtered[['Tanggal', 'Nama Warga', 'Blok']], height=200)
+
 else:
-    st.info("Menunggu inisialisasi...")
+    # JIKA DATABASE KOSONG / ERROR
+    st.info("Database belum siap atau masih kosong.")
     if is_admin:
-        if st.button("Inisialisasi Header Baru"):
+        if st.button("Inisialisasi Header Baru (Reset)"):
             client = connect_to_gsheet()
             if client:
-                sh = client.open(SHEET_NAME).sheet1
-                sh.clear()
-                sh.append_row(["ID", "Tanggal", "Nama Warga", "Blok", "Status Rumah", "Jenis Iuran", "Bulan", "Nominal", "Keterangan", "Bukti Bayar"])
-                st.rerun()
+                try:
+                    sh = client.open(SHEET_NAME).sheet1
+                    sh.clear()
+                    sh.append_row(["ID", "Tanggal", "Nama Warga", "Blok", "Status Rumah", "Jenis Iuran", "Bulan", "Nominal", "Keterangan", "Bukti Bayar"])
+                    st.success("Header berhasil dibuat! Silakan refresh halaman.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal: {e}")
