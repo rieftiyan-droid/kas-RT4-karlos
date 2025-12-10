@@ -112,7 +112,7 @@ def delete_data(target_id):
 # ==========================================
 
 st.title("🏡 Portal Keuangan & Kas RT 4 RW 18 KPV")
-st.caption("Sistem Transparansi Keuangan Digital")
+st.caption("Mewujudkan pengelolaan keuangan yang amanah, transparan, dan penuh keberkahan demi kemaslahatan seluruh warga")
 st.markdown("---")
 
 # --- SIDEBAR (LOGIN & ADMIN) ---
