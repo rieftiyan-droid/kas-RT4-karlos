@@ -249,12 +249,30 @@ if not df.empty:
         else: st.info("Belum ada pengeluaran")
         
     with t4:
-        # === MODIFIKASI TAMPILAN TABEL WARGA ===
+        # === MODIFIKASI TAMPILAN TABEL WARGA (DIPERBAIKI) ===
         if not df_warga.empty:
-            # 1. Tentukan kolom utama yang WAJIB tampil dulu
-            # Kita pakai ID_Rumah (gabungan Blok+No) sebagai pengganti kolom Blok & No yang terpisah
+            # Kolom wajib
             kolom_utama = ['ID_Rumah', 'Nama Penghuni', 'Status']
             
-            # 2. Cari kolom tambahan lain di Excel (misal: No HP, Jml Anggota, dll)
-            # Kita hindari menampilkan kolom 'Blok', 'No', 'Label' yang membingungkan
-            kolom_tambahan = [c for c in df_warga
+            # Kolom sistem yang harus disembunyikan
+            exclude_list = ['Blok', 'No', 'ID_Rumah', 'Nama Penghuni', 'Status', 'Label']
+            
+            # Cari kolom tambahan (looping diperbaiki agar tidak error)
+            kolom_tambahan = []
+            for c in df_warga.columns:
+                if c not in exclude_list:
+                    kolom_tambahan.append(c)
+            
+            # Gabungkan
+            kolom_final = kolom_utama + kolom_tambahan
+            
+            # Tampilkan Tabel
+            st.dataframe(
+                df_warga[kolom_final], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.warning("Belum ada data warga.")
+
+else: st.info("Database kosong / Belum inisialisasi.")
