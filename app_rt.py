@@ -58,6 +58,7 @@ def load_master_warga():
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
             if not df.empty:
+                # Pastikan ID Rumah ada (Gabungan Blok + No)
                 df['ID_Rumah'] = df['Blok'].astype(str) + "-" + df['No'].astype(str)
                 if 'Nama Penghuni' not in df.columns: df['Nama Penghuni'] = ""
             return df
@@ -102,8 +103,8 @@ def delete_data(target_id):
 #               UI APLIKASI
 # ==========================================
 
-st.title("🏡 Portal Digital RT 04 RW 18 KPV")
-st.caption("Mewujudkan pengelolaan keuangan yang amanah, transparan, dan penuh keberkahan demi kemaslahatan seluruh warga")
+st.title("🏡 Portal Digital RT 04 RW 18")
+st.caption("Sistem Informasi & Keuangan Warga")
 st.markdown("---")
 
 # --- A. SIDEBAR ADMIN ---
@@ -121,7 +122,6 @@ if is_admin:
     if menu_admin == "📝 Input Keuangan":
         st.sidebar.header("Input Transaksi")
         
-        # OPSI DI LUAR FORM AGAR INTERAKTIF
         tipe_transaksi = st.sidebar.radio("Tipe", ["Pemasukan 💰", "Pengeluaran 💸"])
         
         sumber_dana = "Warga"
@@ -131,11 +131,11 @@ if is_admin:
         with st.sidebar.form("form_keuangan"):
             nama_final = ""; blok_final = ""; status_final = "-"; jenis = ""; bulan = "-"
             
-            # --- LOGIKA INPUT ---
             if tipe_transaksi == "Pemasukan 💰":
                 if sumber_dana == "Warga (Iuran)":
                     df_warga = load_master_warga()
                     if not df_warga.empty:
+                        # Buat label dropdown
                         df_warga['Label'] = df_warga['ID_Rumah'] + " (" + df_warga['Status'] + ")" + df_warga['Nama Penghuni'].apply(lambda x: " - " + str(x) if str(x).strip() != "" else "")
                         pilih = st.selectbox("Pilih Warga", df_warga['Label'].unique())
                         dt = df_warga[df_warga['Label'] == pilih].iloc[0]
@@ -146,15 +146,10 @@ if is_admin:
                     
                     jenis = st.selectbox("Jenis", ["Iuran Wajib", "Kematian", "Agustusan", "Sumbangan", "Lainnya"])
                     bulan = st.selectbox("Bulan", ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember", "-"])
-                
                 else:
-                    # NON-WARGA
                     jenis = st.selectbox("Sumber Dana", ["Kas Tahun Lalu", "Dana Desa", "Bunga Bank", "Donasi Eksternal", "Lainnya"])
-                    nama_final = jenis
-                    blok_final = "-"; status_final = "-"; bulan = "-"
-            
+                    nama_final = jenis; blok_final = "-"; status_final = "-"; bulan = "-"
             else:
-                # PENGELUARAN
                 nama_final = st.text_input("Uraian Belanja")
                 jenis = st.selectbox("Kategori", ["Perbaikan Fasilitas", "Konsumsi Rapat", "Honor Keamanan/Sampah", "Sosial", "Lainnya"])
                 blok_final = "-"
@@ -186,17 +181,17 @@ if is_admin:
                 st.success("Terhapus!"); st.rerun()
             else: st.error("ID tidak ditemukan")
 
-    # --- RESET DATABASE ---
+    # --- RESET ---
     st.sidebar.markdown("---")
     with st.sidebar.expander("⚠️ Reset System"):
-        if st.button("🔴 Buat Header & Tabel Baru"):
+        if st.button("🔴 Buat Header Baru"):
             client = connect_to_gsheet()
             if client:
                 try:
                     sh1 = client.open(SHEET_NAME).sheet1
                     sh1.clear()
                     sh1.append_row(["ID", "Tanggal", "Nama Warga", "Blok", "Status Rumah", "Jenis Iuran", "Bulan", "Nominal", "Keterangan", "Bukti Bayar"])
-                    st.success("✅ Database Siap!")
+                    st.success("Database Siap!")
                     st.rerun()
                 except Exception as e: st.error(f"Gagal: {e}")
 
@@ -253,6 +248,13 @@ if not df.empty:
             st.dataframe(tampil_keluar, use_container_width=True)
         else: st.info("Belum ada pengeluaran")
         
-    with t4: st.dataframe(df_warga, use_container_width=True)
-
-else: st.info("Database kosong / Belum inisialisasi.")
+    with t4:
+        # === MODIFIKASI TAMPILAN TABEL WARGA ===
+        if not df_warga.empty:
+            # 1. Tentukan kolom utama yang WAJIB tampil dulu
+            # Kita pakai ID_Rumah (gabungan Blok+No) sebagai pengganti kolom Blok & No yang terpisah
+            kolom_utama = ['ID_Rumah', 'Nama Penghuni', 'Status']
+            
+            # 2. Cari kolom tambahan lain di Excel (misal: No HP, Jml Anggota, dll)
+            # Kita hindari menampilkan kolom 'Blok', 'No', 'Label' yang membingungkan
+            kolom_tambahan = [c for c in df_warga
